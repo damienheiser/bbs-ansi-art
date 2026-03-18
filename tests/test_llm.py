@@ -1,9 +1,9 @@
 """Tests for LLM integration: styles, corpus, generator."""
 
 import json
+import os
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -160,7 +160,7 @@ class TestCorpusIndex:
 
 class TestGenerator:
     def test_build_messages_without_examples(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         style = get_style("acid")
         messages = gen._build_messages(
             text="HELLO",
@@ -175,7 +175,7 @@ class TestGenerator:
         assert "HELLO" in messages[1]["content"]
 
     def test_build_messages_with_examples(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         style = get_style("acid")
         examples = [
             CorpusEntry(
@@ -204,7 +204,7 @@ class TestGenerator:
         assert "Add shadow" in messages[1]["content"]
 
     def test_validate_output_strips_markdown(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         raw = "```\nROW 0: [red]██[reset]\nROW 1: [blue]▄▄[reset]\n```"
         cleaned = gen._validate_output(raw, 80)
         assert "```" not in cleaned
@@ -212,7 +212,7 @@ class TestGenerator:
         assert "ROW 1:" in cleaned
 
     def test_validate_output_strips_commentary(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         raw = "Here is your art:\n\nROW 0: [red]██[reset]\nROW 1: [blue]▄▄[reset]\n\nHope you like it!"
         cleaned = gen._validate_output(raw, 80)
         lines = cleaned.strip().split("\n")
@@ -220,7 +220,7 @@ class TestGenerator:
         assert all(line.startswith("ROW") for line in lines)
 
     def test_validate_output_renumbers(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         raw = "ROW 0: [red]██[reset]\nROW 5: [blue]▄▄[reset]\nROW 99: [green]▀▀[reset]"
         cleaned = gen._validate_output(raw, 80)
         assert "ROW 0:" in cleaned
@@ -228,23 +228,50 @@ class TestGenerator:
         assert "ROW 2:" in cleaned
 
     def test_parse_result_basic(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         llm_text = "ROW 0: [bright_cyan]████[reset]\nROW 1: [bright_cyan]█[white]  [bright_cyan]█[reset]"
         canvas = gen._parse_result(llm_text, 80)
         assert canvas.current_height >= 2
         assert canvas.width == 80
 
     def test_parse_result_empty(self):
-        gen = AnsiTextGenerator(api_key="test")
+        gen = AnsiTextGenerator()
         canvas = gen._parse_result("", 80)
         assert canvas is not None
 
-    def test_generate_sync_requires_api_key(self):
-        gen = AnsiTextGenerator(api_key=None)
-        with pytest.raises(ValueError, match="API key"):
-            gen.generate_sync(text="TEST")
-
-    def test_generate_sync_rejects_unknown_style(self):
-        gen = AnsiTextGenerator(api_key="test")
+    def test_generate_rejects_unknown_style(self):
+        gen = AnsiTextGenerator()
         with pytest.raises(ValueError, match="Unknown style"):
-            gen.generate_sync(text="TEST", style="nonexistent")
+            gen.generate(text="TEST", style="nonexistent")
+
+    def test_parse_cli_json_result_event(self):
+        gen = AnsiTextGenerator()
+        raw = json.dumps([
+            {"type": "system", "subtype": "init", "model": "claude-opus-4-20250514"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "ROW 0: [red]██[reset]",
+                "total_cost_usd": 0.05,
+                "duration_ms": 3000,
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+                "modelUsage": {"claude-opus-4-20250514": {}},
+            },
+        ])
+        text, metadata = gen._parse_cli_json(raw)
+        assert text == "ROW 0: [red]██[reset]"
+        assert metadata["cost_usd"] == 0.05
+        assert metadata["duration_ms"] == 3000
+        assert metadata["model"] == "claude-opus-4-20250514"
+
+    def test_parse_cli_json_fallback_to_raw(self):
+        gen = AnsiTextGenerator()
+        text, metadata = gen._parse_cli_json("not json at all")
+        assert text == "not json at all"
+
+    def test_find_claude_cli(self):
+        """claude CLI should be findable on this system."""
+        from bbs_ansi_art.llm.generator import _find_claude_cli
+        path = _find_claude_cli()
+        assert path is not None
+        assert os.path.isfile(path)

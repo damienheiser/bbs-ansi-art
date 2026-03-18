@@ -1,22 +1,28 @@
-"""ANSI art text generator using Claude API.
+"""ANSI art text generator using Claude CLI.
 
 Generates stylized block lettering by assembling a mega-prompt from corpus
-examples and style guidance, then calling Claude to produce LlmText output
-that gets parsed back to Canvas/AnsiDocument.
+examples and style guidance, then calling the Claude CLI (`claude -p`) to
+produce LlmText output that gets parsed back to Canvas/AnsiDocument.
+
+Requires the `claude` CLI to be installed and authenticated.
+No anthropic Python package needed.
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from bbs_ansi_art.core.canvas import Canvas
 from bbs_ansi_art.core.document import AnsiDocument
-from bbs_ansi_art.render.llm_text import LlmTextParser, LlmTextRenderer
+from bbs_ansi_art.render.llm_text import LlmTextParser
 from bbs_ansi_art.sauce.record import SauceRecord
 
 if TYPE_CHECKING:
@@ -34,8 +40,8 @@ class TextGenResult:
     llm_text: str
     style: str
     input_text: str
-    prompt_tokens: int = 0
-    output_tokens: int = 0
+    cost_usd: float = 0.0
+    duration_ms: int = 0
     model: str = ""
 
 
@@ -132,39 +138,64 @@ Requirements:
 {extra_instructions}"""
 
 
+def _find_claude_cli() -> str:
+    """Find the claude CLI binary."""
+    path = shutil.which("claude")
+    if path:
+        return path
+    # Common install locations
+    for candidate in [
+        os.path.expanduser("~/.claude/local/claude"),
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ]:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    raise FileNotFoundError(
+        "Claude CLI not found. Install from: https://docs.anthropic.com/en/docs/claude-code"
+    )
+
+
 class AnsiTextGenerator:
-    """Generate stylized ANSI block lettering via Claude API.
+    """Generate stylized ANSI block lettering via Claude CLI.
+
+    Uses `claude -p` (print mode) to run non-interactively. Requires the
+    Claude CLI to be installed and authenticated — no API key or anthropic
+    package needed.
 
     Usage:
         gen = AnsiTextGenerator(corpus=corpus)
-        result = await gen.generate("HELLO", style="acid", width=80)
+        result = gen.generate("HELLO", style="acid", width=80)
         print(result.document.render())
-
-        # Sync:
-        result = gen.generate_sync("HELLO", style="acid")
     """
 
     def __init__(
         self,
         corpus: CorpusIndex | None = None,
-        api_key: str | None = None,
-        model: str = "claude-opus-4-20250514",
+        model: str = "opus",
+        claude_path: str | None = None,
     ):
+        """
+        Args:
+            corpus: Pre-built corpus index for examples. None = no examples.
+            model: Model alias or full name (default: "opus" for 1M context).
+            claude_path: Path to claude CLI binary. None = auto-detect.
+        """
         self.corpus = corpus
-        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.model = model
+        self.claude_path = claude_path
         self._parser = LlmTextParser()
 
-    async def generate(
+    def generate(
         self,
         text: str,
         style: str = "acid",
         width: int = 80,
         height: int | None = None,
         num_examples: int = 15,
-        temperature: float = 0.7,
-        max_tokens: int = 8192,
         instructions: list[str] | None = None,
+        timeout: int = 300,
+        max_budget_usd: float | None = None,
     ) -> TextGenResult:
         """Generate stylized ANSI block lettering.
 
@@ -174,21 +205,14 @@ class AnsiTextGenerator:
             width: Maximum output width in columns.
             height: Desired height in rows (None = auto based on style).
             num_examples: Number of corpus examples to include.
-            temperature: LLM sampling temperature.
-            max_tokens: Maximum output tokens.
             instructions: Additional generation instructions.
+            timeout: CLI timeout in seconds.
+            max_budget_usd: Maximum cost cap passed to claude CLI.
 
         Returns:
             TextGenResult with canvas, document, and metadata.
         """
         from bbs_ansi_art.llm.styles import get_style
-
-        # Validate inputs before checking for anthropic package
-        if not self.api_key:
-            raise ValueError(
-                "Anthropic API key required. Set ANTHROPIC_API_KEY env var "
-                "or pass api_key to AnsiTextGenerator."
-            )
 
         preset = get_style(style)
         if not preset:
@@ -197,13 +221,7 @@ class AnsiTextGenerator:
                 f"Available: acid, ice, blocky, ascii, amiga, dark, neon, minimal, fire"
             )
 
-        try:
-            import anthropic
-        except ImportError:
-            raise ImportError(
-                "anthropic package required for generation. "
-                "Install with: pip install bbs-ansi-art[llm]"
-            )
+        claude_bin = self.claude_path or _find_claude_cli()
 
         if height is None:
             height = preset.letter_height
@@ -217,7 +235,7 @@ class AnsiTextGenerator:
                 max_tokens=600_000,
             )
 
-        # Build messages
+        # Build prompts
         messages = self._build_messages(
             text=text,
             style=preset,
@@ -227,26 +245,32 @@ class AnsiTextGenerator:
             instructions=instructions or [],
         )
 
-        system_msg = messages[0]["content"]
-        user_msg = messages[1]["content"]
-
-        # Call Claude API
-        client = anthropic.AsyncAnthropic(api_key=self.api_key)
+        system_prompt = messages[0]["content"]
+        user_prompt = messages[1]["content"]
 
         logger.info(
             "Generating '%s' in %s style (%d examples, model=%s)",
             text, style, len(examples), self.model,
         )
 
-        response = await client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            system=system_msg,
-            messages=[{"role": "user", "content": user_msg}],
-        )
+        # Write the user prompt to a temp file to avoid shell argument limits
+        # (corpus examples can be very large — easily 500K+ chars)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8",
+        ) as prompt_file:
+            prompt_file.write(user_prompt)
+            prompt_path = prompt_file.name
 
-        raw_output = response.content[0].text
+        try:
+            raw_output, metadata = self._run_claude(
+                claude_bin=claude_bin,
+                system_prompt=system_prompt,
+                prompt_path=prompt_path,
+                timeout=timeout,
+                max_budget_usd=max_budget_usd,
+            )
+        finally:
+            os.unlink(prompt_path)
 
         # Validate and parse
         cleaned = self._validate_output(raw_output, width)
@@ -268,14 +292,119 @@ class AnsiTextGenerator:
             llm_text=cleaned,
             style=style,
             input_text=text,
-            prompt_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            model=self.model,
+            cost_usd=metadata.get("cost_usd", 0.0),
+            duration_ms=metadata.get("duration_ms", 0),
+            model=metadata.get("model", self.model),
         )
 
-    def generate_sync(self, **kwargs) -> TextGenResult:
-        """Synchronous wrapper around generate()."""
-        return asyncio.run(self.generate(**kwargs))
+    def _run_claude(
+        self,
+        claude_bin: str,
+        system_prompt: str,
+        prompt_path: str,
+        timeout: int,
+        max_budget_usd: float | None,
+    ) -> tuple[str, dict]:
+        """Execute the claude CLI and return (output_text, metadata).
+
+        Uses `claude -p` with `--output-format json` for structured results,
+        piping the prompt via stdin from a temp file.
+        """
+        cmd = [
+            claude_bin,
+            "-p",
+            "--model", self.model,
+            "--output-format", "json",
+            "--system-prompt", system_prompt,
+            "--no-session-persistence",
+            # Disable all tools — we only want text generation
+            "--allowedTools", "",
+        ]
+
+        if max_budget_usd is not None:
+            cmd.extend(["--max-budget-usd", str(max_budget_usd)])
+
+        # Read prompt from file and pipe to stdin
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            user_prompt = f.read()
+
+        logger.debug(
+            "Running: %s (prompt: %d chars, system: %d chars)",
+            " ".join(cmd[:6]) + " ...",
+            len(user_prompt),
+            len(system_prompt),
+        )
+
+        result = subprocess.run(
+            cmd,
+            input=user_prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            raise RuntimeError(
+                f"Claude CLI exited with code {result.returncode}: {stderr}"
+            )
+
+        # Parse JSON output — it's a JSON array of event objects
+        raw_json = result.stdout.strip()
+        return self._parse_cli_json(raw_json)
+
+    def _parse_cli_json(self, raw_json: str) -> tuple[str, dict]:
+        """Parse the JSON array output from `claude -p --output-format json`.
+
+        Returns (result_text, metadata_dict).
+        """
+        metadata: dict = {}
+
+        try:
+            events = json.loads(raw_json)
+        except json.JSONDecodeError:
+            # If JSON parsing fails, treat the entire output as raw text
+            logger.warning("Failed to parse CLI JSON output, using raw text")
+            return raw_json, metadata
+
+        result_text = ""
+
+        for event in events:
+            event_type = event.get("type", "")
+
+            if event_type == "result":
+                result_text = event.get("result", "")
+                metadata["cost_usd"] = event.get("total_cost_usd", 0.0)
+                metadata["duration_ms"] = event.get("duration_ms", 0)
+                metadata["is_error"] = event.get("is_error", False)
+
+                usage = event.get("usage", {})
+                metadata["input_tokens"] = usage.get("input_tokens", 0)
+                metadata["output_tokens"] = usage.get("output_tokens", 0)
+
+                # Extract model from modelUsage keys
+                model_usage = event.get("modelUsage", {})
+                if model_usage:
+                    metadata["model"] = next(iter(model_usage))
+
+            elif event_type == "system" and event.get("subtype") == "init":
+                metadata["session_id"] = event.get("session_id", "")
+                metadata["model"] = event.get("model", "")
+
+        if not result_text:
+            # Fallback: look for assistant message content
+            for event in events:
+                if event.get("type") == "assistant":
+                    msg = event.get("message", {})
+                    for block in msg.get("content", []):
+                        if block.get("type") == "text":
+                            result_text = block.get("text", "")
+                            if result_text:
+                                break
+                if result_text:
+                    break
+
+        return result_text, metadata
 
     def _build_messages(
         self,
@@ -286,7 +415,7 @@ class AnsiTextGenerator:
         examples: list,
         instructions: list[str],
     ) -> list[dict]:
-        """Build the system + user messages for the API call."""
+        """Build the system + user messages for the CLI call."""
         # System message
         palette_lines = []
         for i, color in enumerate(style.color_palette):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate ANSI art text via Claude API with corpus-informed style.
+"""Generate ANSI art text via Claude CLI with corpus-informed style.
 
 Usage:
     # First time: build corpus index
@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import asyncio
 import logging
 import sys
 import os
@@ -44,7 +43,7 @@ def build_corpus(corpus_path: str, cache_path: str) -> None:
     print(f"  Cache saved to: {cache_path}")
 
 
-async def generate_text(
+def generate_text(
     text: str,
     style: str,
     width: int,
@@ -52,7 +51,7 @@ async def generate_text(
     cache_path: str,
     save_path: str | None,
     model: str,
-    temperature: float,
+    max_budget: float | None,
 ) -> None:
     """Generate and display ANSI art text."""
     # Load corpus if available
@@ -67,12 +66,12 @@ async def generate_text(
     gen = AnsiTextGenerator(corpus=corpus, model=model)
 
     print(f"Generating '{text}' in {style} style...", file=sys.stderr)
-    result = await gen.generate(
+    result = gen.generate(
         text=text,
         style=style,
         width=width,
         num_examples=num_examples,
-        temperature=temperature,
+        max_budget_usd=max_budget,
     )
 
     # Display
@@ -81,10 +80,9 @@ async def generate_text(
 
     # Stats
     print(file=sys.stderr)
-    print(
-        f"  Tokens: {result.prompt_tokens:,} in / {result.output_tokens:,} out",
-        file=sys.stderr,
-    )
+    print(f"  Model: {result.model}", file=sys.stderr)
+    print(f"  Cost: ${result.cost_usd:.4f}", file=sys.stderr)
+    print(f"  Duration: {result.duration_ms}ms", file=sys.stderr)
     print(f"  Canvas: {result.canvas.width}x{result.canvas.current_height}", file=sys.stderr)
 
     # Save
@@ -104,14 +102,14 @@ def list_styles() -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate ANSI art text via Claude API")
+    parser = argparse.ArgumentParser(description="Generate ANSI art text via Claude CLI")
     parser.add_argument("text", nargs="*", help="Text to render")
     parser.add_argument("--style", "-s", default="acid", help="Style preset (default: acid)")
     parser.add_argument("--width", "-w", type=int, default=80, help="Output width (default: 80)")
     parser.add_argument("--examples", "-n", type=int, default=15, help="Number of corpus examples")
     parser.add_argument("--save", help="Save output as .ans file")
-    parser.add_argument("--model", default="claude-opus-4-20250514", help="Claude model to use")
-    parser.add_argument("--temperature", "-t", type=float, default=0.7, help="Temperature")
+    parser.add_argument("--model", default="opus", help="Claude model alias or name (default: opus)")
+    parser.add_argument("--max-budget", type=float, help="Max cost in USD")
     parser.add_argument("--cache", default=DEFAULT_CACHE, help="Corpus cache path")
     parser.add_argument("--build-corpus", metavar="PATH", help="Build corpus from archive directory")
     parser.add_argument("--list-styles", action="store_true", help="List available styles")
@@ -135,7 +133,7 @@ def main():
         return
 
     text = " ".join(args.text)
-    asyncio.run(generate_text(
+    generate_text(
         text=text,
         style=args.style,
         width=args.width,
@@ -143,8 +141,8 @@ def main():
         cache_path=args.cache,
         save_path=args.save,
         model=args.model,
-        temperature=args.temperature,
-    ))
+        max_budget=args.max_budget,
+    )
 
 
 if __name__ == "__main__":
