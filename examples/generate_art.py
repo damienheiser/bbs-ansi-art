@@ -34,6 +34,20 @@ import sys
 import os
 import textwrap
 
+# ── Python version gate ──
+if sys.version_info < (3, 10):
+    print(
+        f"Error: Python 3.10+ required (you have {sys.version_info.major}.{sys.version_info.minor}).\n"
+        f"\n"
+        f"The bbs-ansi-art library uses dataclass features from Python 3.10.\n"
+        f"Try one of:\n"
+        f"  /opt/homebrew/bin/python3 {os.path.basename(__file__)} --help\n"
+        f"  python3.10 {os.path.basename(__file__)} --help\n"
+        f"  python3.12 {os.path.basename(__file__)} --help\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from bbs_ansi_art.llm.corpus import CorpusIndex

@@ -8,6 +8,15 @@ and the ArtBuilder fluent API.
 import sys
 import os
 
+if sys.version_info < (3, 10):
+    print(
+        f"Error: Python 3.10+ required (you have {sys.version_info.major}.{sys.version_info.minor}).\n"
+        f"\n"
+        f"Try: /opt/homebrew/bin/python3 {os.path.basename(__file__)} --help",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from bbs_ansi_art.create.builder import ArtBuilder
