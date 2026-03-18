@@ -33,6 +33,23 @@ complete -c generate_art.py -l width -s w -x -d "Output width in columns"
 complete -c generate_art.py -l examples -s n -x -d "Number of corpus examples"
 complete -c generate_art.py -l save -r -d "Save as .ans file" -F
 complete -c generate_art.py -l max-budget -x -d "Max cost in USD"
+complete -c generate_art.py -l color -s c -x -d "Monochrome color override" \
+    -a "bright_cyan\t'Bright Cyan'
+        bright_white\t'Bright White'
+        bright_red\t'Bright Red'
+        bright_green\t'Bright Green'
+        bright_yellow\t'Bright Yellow'
+        bright_blue\t'Bright Blue'
+        bright_magenta\t'Bright Magenta'
+        cyan\t'Cyan'
+        white\t'White'
+        red\t'Red'
+        green\t'Green'
+        yellow\t'Yellow'
+        blue\t'Blue'
+        magenta\t'Magenta'
+        bright_black\t'Dark Gray'"
+complete -c generate_art.py -l instruction -s i -x -d "Extra instruction for the LLM (repeatable)"
 complete -c generate_art.py -l cache -r -d "Corpus cache path" -F
 complete -c generate_art.py -l build-corpus -r -d "Build corpus from archive dir" -a "(__fish_complete_directories)"
 complete -c generate_art.py -l list-styles -d "List available styles"

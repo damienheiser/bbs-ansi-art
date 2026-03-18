@@ -52,6 +52,8 @@ def generate_text(
     save_path: str | None,
     model: str,
     max_budget: float | None,
+    color: str | None = None,
+    extra_instructions: list[str] | None = None,
 ) -> None:
     """Generate and display ANSI art text."""
     # Load corpus if available
@@ -65,13 +67,28 @@ def generate_text(
 
     gen = AnsiTextGenerator(corpus=corpus, model=model)
 
-    print(f"Generating '{text}' in {style} style...", file=sys.stderr)
+    # Build instructions list
+    instructions = list(extra_instructions or [])
+    if color:
+        instructions.append(
+            f"MONOCHROME: Use ONLY [{color}] as the color for all lettering. "
+            f"You may use [bright_black] for shadows and [{color}] shading variants "
+            f"(e.g. lighter/darker) but NO other hue. The block shapes, shading "
+            f"technique, and character usage should still follow the {style} style."
+        )
+
+    desc = f"{style} style"
+    if color:
+        desc += f", mono {color}"
+    print(f"Generating '{text}' in {desc}...", file=sys.stderr)
+
     result = gen.generate(
         text=text,
         style=style,
         width=width,
         num_examples=num_examples,
         max_budget_usd=max_budget,
+        instructions=instructions or None,
     )
 
     # Display
@@ -110,6 +127,8 @@ def main():
     parser.add_argument("--save", help="Save output as .ans file")
     parser.add_argument("--model", default="opus", help="Claude model alias or name (default: opus)")
     parser.add_argument("--max-budget", type=float, help="Max cost in USD")
+    parser.add_argument("--color", "-c", help="Monochrome: use only this color (e.g. bright_cyan, red, bright_white)")
+    parser.add_argument("--instruction", "-i", action="append", dest="instructions", help="Extra instruction for the LLM (repeatable)")
     parser.add_argument("--cache", default=DEFAULT_CACHE, help="Corpus cache path")
     parser.add_argument("--build-corpus", metavar="PATH", help="Build corpus from archive directory")
     parser.add_argument("--list-styles", action="store_true", help="List available styles")
@@ -142,6 +161,8 @@ def main():
         save_path=args.save,
         model=args.model,
         max_budget=args.max_budget,
+        color=args.color,
+        extra_instructions=args.instructions,
     )
 
 

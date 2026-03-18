@@ -10,7 +10,8 @@ _generate_art() {
 
     styles="acid ice blocky ascii amiga dark neon minimal fire"
     models="opus sonnet haiku"
-    opts="--style -s --width -w --examples -n --save --model --max-budget --cache --build-corpus --list-styles --verbose -v --help -h"
+    colors="bright_cyan bright_white bright_red bright_green bright_yellow bright_blue bright_magenta cyan white red green yellow blue magenta bright_black"
+    opts="--style -s --width -w --examples -n --save --model --max-budget --color -c --instruction -i --cache --build-corpus --list-styles --verbose -v --help -h"
 
     case "${prev}" in
         --style|-s)
@@ -21,6 +22,10 @@ _generate_art() {
             COMPREPLY=( $(compgen -W "${models}" -- "${cur}") )
             return 0
             ;;
+        --color|-c)
+            COMPREPLY=( $(compgen -W "${colors}" -- "${cur}") )
+            return 0
+            ;;
         --save)
             COMPREPLY=( $(compgen -f -X '!*.ans' -- "${cur}") )
             return 0
@@ -29,7 +34,7 @@ _generate_art() {
             COMPREPLY=( $(compgen -d -- "${cur}") )
             return 0
             ;;
-        --width|-w|--examples|-n|--max-budget)
+        --width|-w|--examples|-n|--max-budget|--instruction|-i)
             return 0
             ;;
     esac
