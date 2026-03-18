@@ -162,9 +162,54 @@ python3 examples/generate_art.py "BBS ART" --style neon --save output.ans
 python3 examples/generate_art.py "TEST" --style fire --max-budget 0.50
 ```
 
+**Monochrome — use a style's shapes but a single color:**
+```bash
+python3 examples/generate_art.py "HEDONISTIC" --style acid --color bright_cyan
+python3 examples/generate_art.py "NEON" --style fire --color bright_magenta
+python3 examples/generate_art.py "MONO" --style ice --color bright_white --examples 0
+```
+
+**Use a specific corpus group for examples:**
+```bash
+# Browse what groups are available
+python3 examples/generate_art.py --list-corpus
+
+# Mix any style with examples from a specific art group
+python3 examples/generate_art.py "FIRE" --style neon --corpus-group fire --examples 5
+python3 examples/generate_art.py "RETRO" --style acid --corpus-group lazarus --examples 5
+python3 examples/generate_art.py "FUSION" --style dark --corpus-group fusion --examples 3
+```
+
+**Use a different LLM provider:**
+```bash
+# List available providers
+python3 examples/generate_art.py --list-providers
+
+# CLI providers (must be installed and authenticated)
+python3 examples/generate_art.py "TEST" --provider codex --model o4-mini --examples 0
+python3 examples/generate_art.py "TEST" --provider gemini --model gemini-2.5-pro --examples 0
+python3 examples/generate_art.py "TEST" --provider llama --model llama3.3 --examples 0
+python3 examples/generate_art.py "TEST" --provider opencode --examples 0
+
+# API providers (need env vars: OPENAI_API_KEY, GOOGLE_API_KEY, ANTHROPIC_API_KEY)
+python3 examples/generate_art.py "TEST" --provider openai --model gpt-4o
+python3 examples/generate_art.py "TEST" --provider google --model gemini-2.5-pro
+python3 examples/generate_art.py "TEST" --provider anthropic --model claude-opus-4-20250514
+```
+
+**Custom instructions:**
+```bash
+# Pass extra instructions to the LLM (repeatable)
+python3 examples/generate_art.py "BBS" --style acid \
+  -i "Add a drop shadow" \
+  -i "Make the letters extra tall"
+```
+
 **List styles and get help:**
 ```bash
 python3 examples/generate_art.py --list-styles
+python3 examples/generate_art.py --list-providers
+python3 examples/generate_art.py --list-corpus
 python3 examples/generate_art.py --help
 ```
 
@@ -176,9 +221,13 @@ python3 examples/generate_art.py --help
 | `--examples 10-15` | Best quality, needs patience |
 | `--model sonnet` | Faster generation |
 | `--model opus` | Better art quality, 1M context window |
+| `--provider codex` | Use Codex CLI instead of Claude |
+| `--color bright_cyan` | Monochrome — one color, style shapes |
+| `--corpus-group fire` | Examples from a specific art group |
 | `--max-budget 0.50` | Cost cap in USD |
 | `--width 60` | Narrower output (default: 80) |
 | `--save file.ans` | Save as .ans file with SAUCE metadata |
+| `-i "instruction"` | Extra LLM instruction (repeatable) |
 
 ### Available Styles
 
@@ -194,12 +243,25 @@ python3 examples/generate_art.py --help
 | `minimal` | Clean, thin, lots of whitespace | white, gray | 4 rows |
 | `fire` | Fire Graphics collective - detailed | cyan, white, layered | 7 rows |
 
+### Available Providers
+
+| Provider | Type | Default Model | Requires |
+|----------|------|---------------|----------|
+| `claude` | CLI | opus | `claude` CLI (default) |
+| `codex` | CLI | o4-mini | `codex` CLI |
+| `gemini` | CLI | gemini-2.5-pro | `gemini` CLI |
+| `opencode` | CLI | default | `opencode` CLI |
+| `llama` | CLI | llama3.3 | `llama` CLI |
+| `anthropic` | API | claude-opus-4-20250514 | `pip install anthropic` |
+| `openai` | API | gpt-4o | `pip install openai` |
+| `google` | API | gemini-2.5-pro | `pip install google-genai` |
+
 ### Python API
 
 ```python
 from bbs_ansi_art.llm import CorpusIndex, AnsiTextGenerator
 
-# Without corpus
+# Without corpus — Claude (default)
 gen = AnsiTextGenerator(model="sonnet")
 result = gen.generate("TEST", style="neon")
 print(result.document.render())
@@ -212,6 +274,19 @@ result = gen.generate("HELLO", style="acid", width=80, num_examples=10)
 print(result.document.render())     # Display in terminal
 result.document.save("hello.ans")   # Save as .ans file
 print(f"Cost: ${result.cost_usd:.4f}")
+
+# Use a different provider
+gen = AnsiTextGenerator(provider="codex", model="o4-mini")
+gen = AnsiTextGenerator(provider="gemini", model="gemini-2.5-pro")
+gen = AnsiTextGenerator(provider="openai", model="gpt-4o", api_key="sk-...")
+gen = AnsiTextGenerator(provider="llama", model="llama3.3")
+
+# Use examples from a specific corpus group
+result = gen.generate("FIRE", style="neon", corpus_group="fire")
+
+# Browse the corpus
+print(corpus.list_groups()[:10])    # Top 10 art groups
+print(corpus.list_artists()[:10])   # Top 10 artists
 ```
 
 ### Shell Completions
