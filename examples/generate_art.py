@@ -32,6 +32,7 @@ import argparse
 import logging
 import sys
 import os
+import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -42,6 +43,90 @@ from bbs_ansi_art.llm.providers import list_providers
 from bbs_ansi_art.render.terminal import TerminalRenderer
 
 DEFAULT_CACHE = os.path.expanduser("~/.cache/bbs-ansi-art/corpus.json")
+
+# ── Rich help formatter ──
+
+EPILOG = textwrap.dedent("""\
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    STYLES
+      acid          Classic ACiD Productions 1990s — cyan/magenta, heavy shading
+      ice           iCE Advertisements — clean, professional, blue/cyan
+      blocky        Simple block chars, oldschool — solid █, high contrast
+      ascii         Pure ASCII art (no block chars) — #@= density shading
+      amiga         Amiga demoscene — colorful rainbow, smooth curves
+      dark          Gothic/moody — deep reds, shadows, atmospheric
+      neon          Cyberpunk neon glow — bright on black, electric
+      minimal       Clean, thin, whitespace — elegant, understated
+      fire          Fire Graphics collective — intricate, layered detail
+
+    PROVIDERS
+      CLI (no API key needed — just install and authenticate the tool):
+        claude        Claude Code CLI (default). Models: opus, sonnet, haiku
+        codex         OpenAI Codex CLI. Models: o4-mini, o3
+        gemini        Google Gemini CLI. Models: gemini-2.5-pro
+        opencode      Opencode CLI
+        llama         Meta Llama CLI. Models: llama3.3
+
+      API (needs SDK + env var):
+        anthropic     Anthropic API (ANTHROPIC_API_KEY). pip install anthropic
+        openai        OpenAI API (OPENAI_API_KEY). pip install openai
+        google        Google GenAI API (GOOGLE_API_KEY). pip install google-genai
+
+    COLORS (for --color monochrome mode)
+      bright_cyan    bright_white   bright_red     bright_green
+      bright_yellow  bright_blue    bright_magenta cyan
+      white          red            green          yellow
+      blue           magenta        bright_black
+
+    EXAMPLES
+
+      # Fastest — no API call, local block font
+      python generate_text.py "HELLO" --scheme acid
+
+      # Quick — Claude with style guidance only, no corpus
+      python generate_art.py "HELLO" --style acid --examples 0
+
+      # Balanced — a few corpus examples for better quality
+      python generate_art.py "BBS ART" --style neon --examples 5
+
+      # Best — Opus with many examples (slower, highest quality)
+      python generate_art.py "ANSI" --style acid --model opus --examples 15
+
+      # Monochrome — style shapes in a single color
+      python generate_art.py "MONO" --style fire --color bright_cyan
+
+      # Custom instructions
+      python generate_art.py "BBS" -i "Add a drop shadow" -i "Extra tall letters"
+
+      # Specific corpus group
+      python generate_art.py "RETRO" --corpus-group lazarus --examples 5
+
+      # Different provider
+      python generate_art.py "TEST" --provider codex --model o4-mini --examples 0
+
+      # Save as .ans file
+      python generate_art.py "SAVE ME" --style ice --save output.ans
+
+      # Cost-capped generation
+      python generate_art.py "BUDGET" --max-budget 0.50
+
+    CORPUS SETUP
+      The generator is best with real ANSI art examples from 16colo.rs:
+
+        # Mirror the archive (wget)
+        wget -r -np -nH --cut-dirs=1 -A "*.zip" -P ~/ansi-corpus \\
+          https://16colo.rs/archive/
+
+        # Build the index (~60s for full archive)
+        python generate_art.py --build-corpus ~/ansi-corpus/
+
+        # Browse what's in it
+        python generate_art.py --list-corpus
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+""")
 
 
 def build_corpus(corpus_path: str, cache_path: str) -> None:
@@ -181,26 +266,155 @@ def show_providers() -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate ANSI art text via LLM (Claude, Codex, Gemini, and more)",
+        prog="generate_art.py",
+        description="Generate stylized ANSI block lettering via LLM, "
+                    "informed by a corpus of real BBS-era artwork.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("text", nargs="*", help="Text to render")
-    parser.add_argument("--style", "-s", default="acid", help="Style preset (default: acid)")
-    parser.add_argument("--width", "-w", type=int, default=80, help="Output width (default: 80)")
-    parser.add_argument("--examples", "-n", type=int, default=15, help="Number of corpus examples")
-    parser.add_argument("--save", help="Save output as .ans file")
-    parser.add_argument("--provider", default="claude", help="LLM provider (default: claude)")
-    parser.add_argument("--model", default="opus", help="Model alias or name (default: opus)")
-    parser.add_argument("--max-budget", type=float, help="Max cost in USD")
-    parser.add_argument("--color", "-c", help="Monochrome: single color (e.g. bright_cyan)")
-    parser.add_argument("--instruction", "-i", action="append", dest="instructions",
-                        help="Extra instruction for the LLM (repeatable)")
-    parser.add_argument("--corpus-group", help="Use examples from this art group only")
-    parser.add_argument("--cache", default=DEFAULT_CACHE, help="Corpus cache path")
-    parser.add_argument("--build-corpus", metavar="PATH", help="Build corpus from archive directory")
-    parser.add_argument("--list-styles", action="store_true", help="List style presets")
-    parser.add_argument("--list-corpus", action="store_true", help="List corpus groups and artists")
-    parser.add_argument("--list-providers", action="store_true", help="List LLM providers")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+
+    # ── Positional ──
+    parser.add_argument(
+        "text", nargs="*", metavar="TEXT",
+        help="Text to render as block lettering. Multi-word is joined. "
+             "Example: 'HELLO WORLD'. Omit to use --list-* or --build-corpus.",
+    )
+
+    # ── Style & appearance ──
+    style_group = parser.add_argument_group(
+        "style & appearance",
+        "Control the visual style and output dimensions.",
+    )
+    style_group.add_argument(
+        "--style", "-s", default="acid", metavar="NAME",
+        help="Art style preset. Determines color palette, character usage, "
+             "shading direction, and letter height. "
+             "Choices: acid, ice, blocky, ascii, amiga, dark, neon, minimal, fire. "
+             "Default: acid. Use --list-styles for descriptions.",
+    )
+    style_group.add_argument(
+        "--width", "-w", type=int, default=80, metavar="COLS",
+        help="Maximum output width in terminal columns. Art is generated to "
+             "fit within this width. Default: 80.",
+    )
+    style_group.add_argument(
+        "--color", "-c", metavar="COLOR",
+        help="Monochrome mode: render using only this single color for all "
+             "lettering. Block shapes and shading still follow the chosen "
+             "--style, but the hue is constrained. bright_black is allowed "
+             "for shadows. Example: --color bright_cyan. "
+             "See --help epilog for full color list.",
+    )
+
+    # ── LLM provider ──
+    llm_group = parser.add_argument_group(
+        "LLM provider",
+        "Choose which LLM to use for generation.",
+    )
+    llm_group.add_argument(
+        "--provider", default="claude", metavar="NAME",
+        help="LLM provider to use. CLI providers (claude, codex, gemini, "
+             "opencode, llama) shell out to an installed CLI tool — no API key "
+             "needed. API providers (anthropic, openai, google) call the "
+             "Python SDK directly and need an env var (ANTHROPIC_API_KEY, "
+             "OPENAI_API_KEY, GOOGLE_API_KEY). Default: claude. "
+             "Use --list-providers for details.",
+    )
+    llm_group.add_argument(
+        "--model", default="opus", metavar="MODEL",
+        help="Model name or alias passed to the provider. For Claude: opus "
+             "(best quality, 1M context), sonnet (faster), haiku (fastest). "
+             "For Codex: o4-mini, o3. For Gemini: gemini-2.5-pro. "
+             "For OpenAI API: gpt-4o. Default: opus.",
+    )
+    llm_group.add_argument(
+        "--max-budget", type=float, metavar="USD",
+        help="Maximum cost cap in USD. Passed to the provider if supported "
+             "(currently Claude CLI --max-budget-usd). The generation will "
+             "abort if cost would exceed this. Example: --max-budget 0.50.",
+    )
+    llm_group.add_argument(
+        "--instruction", "-i", action="append", dest="instructions",
+        metavar="TEXT",
+        help="Extra instruction passed to the LLM. Can be repeated. "
+             "Appended to the generation prompt after all style/corpus "
+             "guidance. Example: -i 'Add a drop shadow' -i 'Extra tall'.",
+    )
+
+    # ── Corpus ──
+    corpus_group = parser.add_argument_group(
+        "corpus & examples",
+        "Control which real ANSI artwork examples are included in the prompt.",
+    )
+    corpus_group.add_argument(
+        "--examples", "-n", type=int, default=15, metavar="N",
+        help="Number of real ANSI artwork examples to include in the prompt. "
+             "More examples = better style fidelity but slower/costlier. "
+             "0 = no examples (style guidance only, fastest). "
+             "3-5 = good balance. 10-15 = best quality. Default: 15.",
+    )
+    corpus_group.add_argument(
+        "--corpus-group", metavar="GROUP",
+        help="Override automatic example selection: use only artworks from "
+             "this art group. Case-insensitive substring match against group "
+             "name and archive path. Example: --corpus-group fire, "
+             "--corpus-group lazarus, --corpus-group CiA. "
+             "Use --list-corpus to see available groups.",
+    )
+    corpus_group.add_argument(
+        "--cache", default=DEFAULT_CACHE, metavar="PATH",
+        help="Path to the corpus cache JSON file. Built with --build-corpus. "
+             f"Default: {DEFAULT_CACHE}",
+    )
+
+    # ── Output ──
+    output_group = parser.add_argument_group(
+        "output",
+        "Control where and how results are saved.",
+    )
+    output_group.add_argument(
+        "--save", metavar="FILE",
+        help="Save the generated art as a .ans file with SAUCE metadata "
+             "(title, author, dimensions). The art is also printed to stdout. "
+             "Example: --save output.ans.",
+    )
+
+    # ── Setup commands ──
+    setup_group = parser.add_argument_group(
+        "setup & discovery",
+        "Build the corpus or explore available options.",
+    )
+    setup_group.add_argument(
+        "--build-corpus", metavar="PATH",
+        help="Build (or rebuild) the corpus index from a directory of ZIP "
+             "archives. Recursively finds all .zip files, extracts .ans files, "
+             "parses them, analyzes style features, and saves a JSON cache. "
+             "The 16colo.rs archive is the recommended source. "
+             "Example: --build-corpus ~/ansi-corpus/",
+    )
+    setup_group.add_argument(
+        "--list-styles", action="store_true",
+        help="Print all available style presets with descriptions, character "
+             "usage, color palettes, and letter heights, then exit.",
+    )
+    setup_group.add_argument(
+        "--list-corpus", action="store_true",
+        help="Print corpus statistics: total entries, lettering pieces, top "
+             "art groups (with --corpus-group names), and top artists. "
+             "Requires a built corpus cache.",
+    )
+    setup_group.add_argument(
+        "--list-providers", action="store_true",
+        help="Print all available LLM providers with their type (CLI/API), "
+             "default model, and installation requirements, then exit.",
+    )
+
+    # ── Debug ──
+    parser.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Enable verbose logging. Shows corpus loading, example selection, "
+             "provider invocation details, and CLI commands.",
+    )
 
     args = parser.parse_args()
 
