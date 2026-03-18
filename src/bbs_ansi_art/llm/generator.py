@@ -194,7 +194,7 @@ class AnsiTextGenerator:
         height: int | None = None,
         num_examples: int = 15,
         instructions: list[str] | None = None,
-        timeout: int = 300,
+        timeout: int = 600,
         max_budget_usd: float | None = None,
     ) -> TextGenResult:
         """Generate stylized ANSI block lettering.
@@ -310,15 +310,25 @@ class AnsiTextGenerator:
         Uses `claude -p` with `--output-format json` for structured results,
         piping the prompt via stdin from a temp file.
         """
+        # Write system prompt to a temp file too (can be very large)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8",
+        ) as sys_file:
+            sys_file.write(system_prompt)
+            sys_prompt_path = sys_file.name
+
         cmd = [
             claude_bin,
             "-p",
             "--model", self.model,
-            "--output-format", "json",
+            "--output-format", "text",
             "--system-prompt", system_prompt,
             "--no-session-persistence",
             # Disable all tools — we only want text generation
-            "--allowedTools", "",
+            "--disallowed-tools",
+            "Bash", "Read", "Write", "Edit", "Glob", "Grep",
+            "Agent", "Skill", "WebFetch", "WebSearch",
+            "NotebookEdit", "LSP",
         ]
 
         if max_budget_usd is not None:
@@ -335,13 +345,16 @@ class AnsiTextGenerator:
             len(system_prompt),
         )
 
-        result = subprocess.run(
-            cmd,
-            input=user_prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                input=user_prompt,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        finally:
+            os.unlink(sys_prompt_path)
 
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -349,9 +362,18 @@ class AnsiTextGenerator:
                 f"Claude CLI exited with code {result.returncode}: {stderr}"
             )
 
-        # Parse JSON output — it's a JSON array of event objects
-        raw_json = result.stdout.strip()
-        return self._parse_cli_json(raw_json)
+        raw_output = result.stdout.strip()
+        metadata: dict = {}
+
+        # Text mode: output is the raw response text
+        # Try to parse as JSON first (if --output-format json was used)
+        if raw_output.startswith("[{") or raw_output.startswith("{"):
+            try:
+                return self._parse_cli_json(raw_output)
+            except Exception:
+                pass
+
+        return raw_output, metadata
 
     def _parse_cli_json(self, raw_json: str) -> tuple[str, dict]:
         """Parse the JSON array output from `claude -p --output-format json`.
