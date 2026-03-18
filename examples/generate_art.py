@@ -452,15 +452,28 @@ def main():
         parser.print_help()
         return
 
+    # Auto-select model for provider if user didn't override
+    from bbs_ansi_art.llm.providers import default_model
+    model = args.model
+    if model == "opus" and args.provider != "claude":
+        model = default_model(args.provider)
+        print(f"Auto-selected model '{model}' for provider '{args.provider}'", file=sys.stderr)
+
+    # If --corpus-group is set without --style, use a neutral style
+    style = args.style
+    style_was_explicit = "--style" in sys.argv or "-s" in sys.argv
+    if args.corpus_group and not style_was_explicit:
+        style = "blocky"  # neutral — doesn't force a color palette
+
     text = " ".join(args.text)
     generate_text(
         text=text,
-        style=args.style,
+        style=style,
         width=args.width,
         num_examples=args.examples,
         cache_path=args.cache,
         save_path=args.save,
-        model=args.model,
+        model=model,
         max_budget=args.max_budget,
         color=args.color,
         extra_instructions=args.instructions,

@@ -31,6 +31,23 @@ class ProviderResult:
     metadata: dict
 
 
+DEFAULT_MODELS = {
+    "claude": "opus",
+    "codex": "o4-mini",
+    "gemini": "gemini-2.5-pro",
+    "opencode": "default",
+    "llama": "llama3.3",
+    "anthropic": "claude-opus-4-20250514",
+    "openai": "gpt-4o",
+    "google": "gemini-2.5-pro",
+}
+
+
+def default_model(provider: str) -> str:
+    """Get the default model for a provider."""
+    return DEFAULT_MODELS.get(provider.lower(), "default")
+
+
 def get_provider(name: str) -> type:
     """Get a provider class by name."""
     providers = {
@@ -165,19 +182,32 @@ class CodexCliProvider:
         timeout: int = 600,
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
-        # Codex uses config for system prompt — combine into user prompt
+        # Write system+user prompt to a temp file — CLI args have size limits
         combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
-        cmd = [
-            self.binary, "exec",
-            "-m", self.model,
-            "--full-auto",
-            "--ephemeral",
-            combined,
-        ]
+        prompt_path = _write_temp(combined, suffix=".md")
+        try:
+            cmd = [
+                self.binary, "exec",
+                "-m", self.model,
+                "--full-auto",
+                "--ephemeral",
+                "-q",
+                f"Follow the instructions in {prompt_path} exactly. Output ONLY the ROW lines.",
+            ]
 
-        result = _run_cli(cmd, "", timeout)
+            result = _run_cli(cmd, "", timeout)
+        finally:
+            os.unlink(prompt_path)
+
         if result.returncode != 0:
-            raise RuntimeError(f"codex exited {result.returncode}: {result.stderr.strip()}")
+            # Truncate error to avoid dumping the entire prompt
+            stderr = result.stderr.strip()
+            # Find the actual error line
+            for line in stderr.split("\n"):
+                if "ERROR" in line or "error" in line.lower():
+                    stderr = line
+                    break
+            raise RuntimeError(f"codex exited {result.returncode}: {stderr}")
 
         return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
 
@@ -198,20 +228,24 @@ class GeminiCliProvider:
         timeout: int = 600,
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
-        # Gemini uses --policy files for system prompt
+        # Write system prompt as a policy file and user prompt to a temp file
+        # (prompts with corpus examples can be huge — avoid CLI arg limits)
         policy_path = _write_temp(system_prompt, suffix=".md")
+        prompt_path = _write_temp(user_prompt, suffix=".md")
         try:
-            combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
+            # Read prompt from file for -p flag
             cmd = [
                 self.binary,
-                "-p", combined,
+                "-p", f"Follow the instructions in {prompt_path} exactly. Output ONLY the ROW lines.",
                 "--yolo",
                 "--sandbox", "false",
+                "--policy", policy_path,
             ]
 
             result = _run_cli(cmd, "", timeout)
         finally:
             os.unlink(policy_path)
+            os.unlink(prompt_path)
 
         if result.returncode != 0:
             raise RuntimeError(f"gemini exited {result.returncode}: {result.stderr.strip()}")
