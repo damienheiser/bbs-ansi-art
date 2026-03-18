@@ -231,6 +231,90 @@ class CorpusIndex:
 
         return selected
 
+    def list_groups(self) -> list[tuple[str, int]]:
+        """List all art groups in the corpus with entry counts.
+
+        Returns:
+            List of (group_name, count) tuples sorted by count descending.
+        """
+        groups: dict[str, int] = {}
+        for e in self.entries:
+            g = e.group.strip() if e.group.strip() else "(unknown)"
+            groups[g] = groups.get(g, 0) + 1
+        return sorted(groups.items(), key=lambda x: -x[1])
+
+    def list_artists(self) -> list[tuple[str, int]]:
+        """List all artists in the corpus with entry counts.
+
+        Returns:
+            List of (artist_name, count) tuples sorted by count descending.
+        """
+        artists: dict[str, int] = {}
+        for e in self.entries:
+            a = e.author.strip() if e.author.strip() else "(unknown)"
+            artists[a] = artists.get(a, 0) + 1
+        return sorted(artists.items(), key=lambda x: -x[1])
+
+    def select_by_group(
+        self,
+        group: str,
+        count: int = 15,
+        max_tokens: int = 600_000,
+        prefer_lettering: bool = True,
+        max_height: int = 35,
+    ) -> list[CorpusEntry]:
+        """Select examples from a specific art group.
+
+        Args:
+            group: Group name to match (case-insensitive substring).
+            count: Maximum number of examples.
+            max_tokens: Token budget.
+            prefer_lettering: Prefer lettering/logo pieces.
+            max_height: Maximum height.
+
+        Returns:
+            Matching entries, best first.
+        """
+        group_lower = group.lower()
+        candidates = [
+            e for e in self.entries
+            if group_lower in e.group.lower() or group_lower in e.archive_path.lower()
+        ]
+
+        if not candidates:
+            logger.warning("No corpus entries match group %r", group)
+            return []
+
+        # Score by lettering + size
+        scored: list[tuple[float, CorpusEntry]] = []
+        for entry in candidates:
+            if entry.height > max_height:
+                continue
+            score = 0.0
+            if prefer_lettering and entry.has_lettering:
+                score += 30.0
+            if entry.height <= 15:
+                score += 20.0
+            elif entry.height <= 25:
+                score += 10.0
+            score += entry.shading_ratio * 20.0
+            score += min(entry.color_count, 8) * 1.0
+            scored.append((score, entry))
+
+        scored.sort(key=lambda x: -x[0])
+
+        selected: list[CorpusEntry] = []
+        token_total = 0
+        for _score, entry in scored:
+            if len(selected) >= count:
+                break
+            if token_total + entry.estimated_tokens > max_tokens:
+                continue
+            selected.append(entry)
+            token_total += entry.estimated_tokens
+
+        return selected
+
     def _extract_from_zip(self, zip_path: Path) -> Iterator[CorpusEntry]:
         """Extract and index .ans files from a ZIP archive."""
         # Infer year from directory structure

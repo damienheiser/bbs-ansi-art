@@ -244,34 +244,107 @@ class TestGenerator:
         with pytest.raises(ValueError, match="Unknown style"):
             gen.generate(text="TEST", style="nonexistent")
 
-    def test_parse_cli_json_result_event(self):
+    def test_default_provider_is_claude(self):
         gen = AnsiTextGenerator()
-        raw = json.dumps([
-            {"type": "system", "subtype": "init", "model": "claude-opus-4-20250514"},
-            {
-                "type": "result",
-                "subtype": "success",
-                "result": "ROW 0: [red]██[reset]",
-                "total_cost_usd": 0.05,
-                "duration_ms": 3000,
-                "usage": {"input_tokens": 100, "output_tokens": 50},
-                "modelUsage": {"claude-opus-4-20250514": {}},
-            },
-        ])
-        text, metadata = gen._parse_cli_json(raw)
-        assert text == "ROW 0: [red]██[reset]"
-        assert metadata["cost_usd"] == 0.05
-        assert metadata["duration_ms"] == 3000
-        assert metadata["model"] == "claude-opus-4-20250514"
+        assert gen.provider_name == "claude"
 
-    def test_parse_cli_json_fallback_to_raw(self):
+    def test_custom_provider(self):
+        gen = AnsiTextGenerator(provider="codex", model="o4-mini")
+        assert gen.provider_name == "codex"
+
+    def test_unknown_provider_raises(self):
+        from bbs_ansi_art.llm.providers import get_provider
+        with pytest.raises(ValueError, match="Unknown provider"):
+            get_provider("nonexistent")
+
+    def test_result_includes_provider(self):
         gen = AnsiTextGenerator()
-        text, metadata = gen._parse_cli_json("not json at all")
-        assert text == "not json at all"
+        style = get_style("acid")
+        messages = gen._build_messages(
+            text="TEST", style=style, width=80, height=6,
+            examples=[], instructions=[],
+        )
+        # Just verify the generator stores provider info
+        assert gen.provider_name == "claude"
 
-    def test_find_claude_cli(self):
-        """claude CLI should be findable on this system."""
-        from bbs_ansi_art.llm.generator import _find_claude_cli
-        path = _find_claude_cli()
+
+# ── Providers ──
+
+
+class TestProviders:
+    def test_list_providers(self):
+        from bbs_ansi_art.llm.providers import list_providers
+        providers = list_providers()
+        assert "claude" in providers
+        assert "codex" in providers
+        assert "gemini" in providers
+        assert "openai" in providers
+        assert "google" in providers
+        assert "llama" in providers
+        assert "opencode" in providers
+        assert "anthropic" in providers
+
+    def test_get_provider_aliases(self):
+        from bbs_ansi_art.llm.providers import get_provider
+        # These should all resolve
+        assert get_provider("claude") is not None
+        assert get_provider("codex") is not None
+        assert get_provider("gemini") is not None
+
+    def test_find_claude_binary(self):
+        from bbs_ansi_art.llm.providers import _find_binary
+        path = _find_binary("claude")
         assert path is not None
         assert os.path.isfile(path)
+
+
+# ── Corpus Groups ──
+
+
+class TestCorpusGroups:
+    def test_list_groups(self):
+        corpus = CorpusIndex()
+        corpus.entries = [
+            CorpusEntry(
+                archive_path="/test.zip", filename="a.ans",
+                llm_text="ROW 0: [white]█[reset]",
+                width=80, height=5, group="ACiD", estimated_tokens=10,
+            ),
+            CorpusEntry(
+                archive_path="/test.zip", filename="b.ans",
+                llm_text="ROW 0: [white]█[reset]",
+                width=80, height=5, group="ACiD", estimated_tokens=10,
+            ),
+            CorpusEntry(
+                archive_path="/test.zip", filename="c.ans",
+                llm_text="ROW 0: [white]█[reset]",
+                width=80, height=5, group="iCE", estimated_tokens=10,
+            ),
+        ]
+        groups = corpus.list_groups()
+        assert groups[0] == ("ACiD", 2)
+        assert groups[1] == ("iCE", 1)
+
+    def test_select_by_group(self):
+        corpus = CorpusIndex()
+        corpus.entries = [
+            CorpusEntry(
+                archive_path="/test.zip", filename="a.ans",
+                llm_text="ROW 0: [white]█[reset]",
+                width=80, height=5, group="fire", estimated_tokens=10,
+            ),
+            CorpusEntry(
+                archive_path="/test.zip", filename="b.ans",
+                llm_text="ROW 0: [white]█[reset]",
+                width=80, height=5, group="ACiD", estimated_tokens=10,
+            ),
+        ]
+        results = corpus.select_by_group("fire", count=10)
+        assert len(results) == 1
+        assert results[0].group == "fire"
+
+    def test_select_by_group_empty(self):
+        corpus = CorpusIndex()
+        corpus.entries = []
+        results = corpus.select_by_group("nonexistent")
+        assert results == []

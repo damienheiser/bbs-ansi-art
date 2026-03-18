@@ -3,6 +3,7 @@
 from bbs_ansi_art.llm.styles import StylePreset, get_style, list_styles, STYLES
 from bbs_ansi_art.llm.corpus import CorpusIndex, CorpusEntry
 from bbs_ansi_art.llm.generator import AnsiTextGenerator, TextGenResult
+from bbs_ansi_art.llm.providers import get_provider, list_providers
 
 __all__ = [
     "StylePreset",
@@ -13,4 +14,6 @@ __all__ = [
     "CorpusEntry",
     "AnsiTextGenerator",
     "TextGenResult",
+    "get_provider",
+    "list_providers",
 ]

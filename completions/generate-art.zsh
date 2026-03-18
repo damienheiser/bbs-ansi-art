@@ -1,28 +1,30 @@
 #compdef generate_art.py generate-art
 
 # Zsh completion for generate_art.py
-# Source this file: source completions/generate-art.zsh
-# Or copy to a directory in your $fpath
 
 _generate_art() {
-    local -a styles models colors
+    local -a styles models colors providers
 
     styles=(
         'acid:Classic ACiD Productions 1990s'
-        'ice:iCE Advertisements - clean, professional'
-        'blocky:Simple block characters, oldschool'
-        'ascii:Pure ASCII art, no block chars'
+        'ice:iCE Advertisements - clean'
+        'blocky:Block characters, oldschool'
+        'ascii:Pure ASCII, no block chars'
         'amiga:Amiga demoscene, colorful'
         'dark:Gothic, moody'
         'neon:Cyberpunk neon glow'
         'minimal:Clean, thin, whitespace'
-        'fire:Fire Graphics collective - detailed'
+        'fire:Fire Graphics - detailed'
     )
 
     models=(
-        'opus:Best quality, 1M context (slowest)'
-        'sonnet:Good balance of speed and quality'
-        'haiku:Fastest, lower quality'
+        'opus:Claude Opus (best, 1M ctx)'
+        'sonnet:Claude Sonnet (fast)'
+        'haiku:Claude Haiku (fastest)'
+        'o4-mini:OpenAI o4-mini'
+        'gpt-4o:OpenAI GPT-4o'
+        'gemini-2.5-pro:Google Gemini 2.5 Pro'
+        'llama3.3:Meta Llama 3.3'
     )
 
     colors=(
@@ -32,18 +34,33 @@ _generate_art() {
         'bright_black'
     )
 
+    providers=(
+        'claude:Claude CLI (default)'
+        'codex:OpenAI Codex CLI'
+        'gemini:Google Gemini CLI'
+        'opencode:Opencode CLI'
+        'llama:Meta Llama CLI'
+        'anthropic:Anthropic API'
+        'openai:OpenAI API'
+        'google:Google GenAI API'
+    )
+
     _arguments -s \
         '(-s --style)'{-s,--style}'[Style preset]:style:(( ${styles} ))' \
         '(-w --width)'{-w,--width}'[Output width in columns]:width:' \
         '(-n --examples)'{-n,--examples}'[Number of corpus examples]:count:' \
-        '--save[Save output as .ans file]:output file:_files -g "*.ans"' \
-        '--model[Claude model]:model:(( ${models} ))' \
+        '--save[Save as .ans file]:output file:_files -g "*.ans"' \
+        '--provider[LLM provider]:provider:(( ${providers} ))' \
+        '--model[Model name]:model:(( ${models} ))' \
         '--max-budget[Max cost in USD]:budget:' \
-        '(-c --color)'{-c,--color}'[Monochrome color override]:color:( ${colors} )' \
-        '*'{-i,--instruction}'[Extra instruction for the LLM]:instruction:' \
-        '--cache[Corpus cache path]:cache path:_files -g "*.json"' \
-        '--build-corpus[Build corpus from archive directory]:corpus path:_directories' \
-        '--list-styles[List available styles]' \
+        '(-c --color)'{-c,--color}'[Monochrome color]:color:( ${colors} )' \
+        '*'{-i,--instruction}'[Extra LLM instruction]:instruction:' \
+        '--corpus-group[Use examples from this group]:group:' \
+        '--cache[Corpus cache path]:cache:_files -g "*.json"' \
+        '--build-corpus[Build corpus from archive dir]:path:_directories' \
+        '--list-styles[List style presets]' \
+        '--list-corpus[List corpus groups and artists]' \
+        '--list-providers[List LLM providers]' \
         '(-v --verbose)'{-v,--verbose}'[Verbose logging]' \
         '(-h --help)'{-h,--help}'[Show help]' \
         '*:text to render:'
