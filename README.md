@@ -122,55 +122,63 @@ python examples/generate_art.py --build-corpus ~/ansi-corpus/
 
 ### Step 2: Generate Art
 
-**Via CLI:**
+All commands assume you're in the project root. Set `PYTHONPATH` once:
 ```bash
-# Basic generation (uses cached corpus if available)
-python examples/generate_art.py "HELLO WORLD" --style acid
-
-# Choose a style
-python examples/generate_art.py "BBS" --style neon
-python examples/generate_art.py "COOL" --style fire
-python examples/generate_art.py "RETRO" --style ice
-
-# Control parameters
-python examples/generate_art.py "TEST" \
-  --style acid \
-  --model opus \        # Model: opus (best, 1M ctx), sonnet (faster)
-  --examples 15 \       # Number of corpus examples in prompt
-  --width 80 \          # Output width in columns
-  --max-budget 1.00 \   # Cost cap in USD
-  --save output.ans     # Save as .ans file
-
-# List all available styles
-python examples/generate_art.py --list-styles
+cd ~/github/bbs-ansi-art    # or wherever you cloned it
+export PYTHONPATH=src        # needed when running from source
 ```
 
-**Via Python API:**
-```python
-from bbs_ansi_art.llm import CorpusIndex, AnsiTextGenerator
-
-# Load corpus (optional)
-corpus = CorpusIndex.load_cache("~/.cache/bbs-ansi-art/corpus.json")
-
-# Create generator
-gen = AnsiTextGenerator(corpus=corpus, model="opus")
-
-# Generate
-result = gen.generate("HELLO", style="acid", width=80, num_examples=15)
-
-# Use the result
-print(result.document.render())     # Display in terminal
-result.document.save("hello.ans")   # Save as .ans file
-print(result.llm_text)              # Raw LlmText for debugging
-print(f"Cost: ${result.cost_usd:.4f}")
+**Quick start — no corpus, instant:**
+```bash
+# Fastest: local block font, no API call at all
+python3 examples/generate_text.py "HELLO WORLD"
+python3 examples/generate_text.py "BBS" --scheme neon --shadow
+python3 examples/generate_text.py "COOL" --scheme fire
 ```
 
-**Without corpus (still works, just fewer examples):**
-```python
-gen = AnsiTextGenerator(model="sonnet")
-result = gen.generate("TEST", style="neon")
-print(result.document.render())
+**Generate with Claude (no corpus):**
+```bash
+# Fast — style guidance only, no corpus examples
+python3 examples/generate_art.py "HELLO WORLD" --style acid --model sonnet --examples 0
+
+# Try different styles
+python3 examples/generate_art.py "BBS" --style neon --examples 0
+python3 examples/generate_art.py "RETRO" --style ice --examples 0
+python3 examples/generate_art.py "DARK" --style dark --examples 0
 ```
+
+**Generate with corpus examples (better quality):**
+```bash
+# Good balance of speed and quality (3-5 examples)
+python3 examples/generate_art.py "HELLO" --style acid --model sonnet --examples 3
+
+# Best quality — more examples, Opus model (slower, 1M context)
+python3 examples/generate_art.py "HELLO" --style acid --model opus --examples 10
+
+# Save output as a .ans file
+python3 examples/generate_art.py "BBS ART" --style neon --save output.ans
+
+# Set a cost cap
+python3 examples/generate_art.py "TEST" --style fire --max-budget 0.50
+```
+
+**List styles and get help:**
+```bash
+python3 examples/generate_art.py --list-styles
+python3 examples/generate_art.py --help
+```
+
+**Tuning tips:**
+| Flag | Effect |
+|------|--------|
+| `--examples 0` | Fastest — style guidance only, no corpus |
+| `--examples 3-5` | Good balance of speed and quality |
+| `--examples 10-15` | Best quality, needs patience |
+| `--model sonnet` | Faster generation |
+| `--model opus` | Better art quality, 1M context window |
+| `--max-budget 0.50` | Cost cap in USD |
+| `--width 60` | Narrower output (default: 80) |
+| `--save file.ans` | Save as .ans file with SAUCE metadata |
 
 ### Available Styles
 
@@ -186,13 +194,24 @@ print(result.document.render())
 | `minimal` | Clean, thin, lots of whitespace | white, gray | 4 rows |
 | `fire` | Fire Graphics collective - detailed | cyan, white, layered | 7 rows |
 
-### Local Block Font (no API needed)
+### Python API
 
-For quick text without an API call, use the built-in block font renderer:
+```python
+from bbs_ansi_art.llm import CorpusIndex, AnsiTextGenerator
 
-```bash
-python examples/generate_text.py "HELLO"
-python examples/generate_text.py "BBS" --scheme neon --shadow
+# Without corpus
+gen = AnsiTextGenerator(model="sonnet")
+result = gen.generate("TEST", style="neon")
+print(result.document.render())
+
+# With corpus (better results)
+corpus = CorpusIndex.load_cache("~/.cache/bbs-ansi-art/corpus.json")
+gen = AnsiTextGenerator(corpus=corpus, model="opus")
+result = gen.generate("HELLO", style="acid", width=80, num_examples=10)
+
+print(result.document.render())     # Display in terminal
+result.document.save("hello.ans")   # Save as .ans file
+print(f"Cost: ${result.cost_usd:.4f}")
 ```
 
 ## Architecture
