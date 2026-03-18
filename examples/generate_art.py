@@ -300,11 +300,13 @@ def main():
         "Control the visual style and output dimensions.",
     )
     style_group.add_argument(
-        "--style", "-s", default="acid", metavar="NAME",
+        "--style", "-s", default=None, metavar="NAME",
         help="Art style preset. Determines color palette, character usage, "
              "shading direction, and letter height. "
              "Choices: acid, ice, blocky, ascii, amiga, dark, neon, minimal, fire. "
-             "Default: acid. Use --list-styles for descriptions.",
+             "If omitted, defaults to 'acid' unless --corpus-group is used "
+             "(then defaults to 'blocky' for neutrality). "
+             "Use --list-styles for descriptions.",
     )
     style_group.add_argument(
         "--width", "-w", type=int, default=80, metavar="COLS",
@@ -335,11 +337,11 @@ def main():
              "Use --list-providers for details.",
     )
     llm_group.add_argument(
-        "--model", default="opus", metavar="MODEL",
-        help="Model name or alias passed to the provider. For Claude: opus "
-             "(best quality, 1M context), sonnet (faster), haiku (fastest). "
-             "For Codex: o4-mini, o3. For Gemini: gemini-2.5-pro. "
-             "For OpenAI API: gpt-4o. Default: opus.",
+        "--model", default=None, metavar="MODEL",
+        help="Model name or alias. CLI providers (claude, codex, gemini) "
+             "use their own default if omitted. API providers use a baked-in "
+             "default (claude-opus-4-20250514, gpt-4o, gemini-2.5-pro). "
+             "Examples: --model sonnet, --model o4-mini, --model gpt-4o.",
     )
     llm_group.add_argument(
         "--max-budget", type=float, metavar="USD",
@@ -452,18 +454,13 @@ def main():
         parser.print_help()
         return
 
-    # Auto-select model for provider if user didn't override
-    from bbs_ansi_art.llm.providers import default_model
-    model = args.model
-    if model == "opus" and args.provider != "claude":
-        model = default_model(args.provider)
-        print(f"Auto-selected model '{model}' for provider '{args.provider}'", file=sys.stderr)
-
-    # If --corpus-group is set without --style, use a neutral style
+    # Style: use what was passed, or pick a sensible default
     style = args.style
-    style_was_explicit = "--style" in sys.argv or "-s" in sys.argv
-    if args.corpus_group and not style_was_explicit:
-        style = "blocky"  # neutral — doesn't force a color palette
+    if style is None:
+        style = "blocky" if args.corpus_group else "acid"
+
+    # Model: pass through as-is (None = let provider decide)
+    model = args.model
 
     text = " ".join(args.text)
     generate_text(

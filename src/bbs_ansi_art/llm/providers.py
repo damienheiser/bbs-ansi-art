@@ -5,14 +5,16 @@ user prompt and return generated text. The prompt format (LlmText ROW
 annotations) is provider-agnostic — any LLM that can follow instructions
 can generate ANSI art.
 
-Supported providers:
-  CLI:  claude, codex, gemini, opencode, llama
-  API:  anthropic, openai, google-genai
+CLI providers (claude, codex, gemini, opencode, llama):
+  Don't need --model — the CLI picks its own default.
+  If --model is passed, it's forwarded to the CLI.
+
+API providers (anthropic, openai, google):
+  Always need a model name. Defaults are baked in.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -31,39 +33,27 @@ class ProviderResult:
     metadata: dict
 
 
-DEFAULT_MODELS = {
-    "claude": "opus",
-    "codex": "o4-mini",
-    "gemini": "gemini-2.5-pro",
-    "opencode": "default",
-    "llama": "llama3.3",
+# API providers need explicit model names. CLI providers don't.
+API_DEFAULT_MODELS = {
     "anthropic": "claude-opus-4-20250514",
     "openai": "gpt-4o",
     "google": "gemini-2.5-pro",
 }
 
 
-def default_model(provider: str) -> str:
-    """Get the default model for a provider."""
-    return DEFAULT_MODELS.get(provider.lower(), "default")
-
-
 def get_provider(name: str) -> type:
     """Get a provider class by name."""
     providers = {
-        # CLI providers
         "claude": ClaudeCliProvider,
         "codex": CodexCliProvider,
         "gemini": GeminiCliProvider,
         "opencode": OpencodeCliProvider,
         "llama": LlamaCliProvider,
-        # API providers
         "anthropic": AnthropicApiProvider,
         "openai": OpenaiApiProvider,
         "google": GoogleApiProvider,
     }
     key = name.lower().replace("-", "").replace("_", "")
-    # Allow aliases
     aliases = {
         "googlegenai": "google",
         "googleai": "google",
@@ -76,6 +66,11 @@ def get_provider(name: str) -> type:
         available = ", ".join(sorted(providers.keys()))
         raise ValueError(f"Unknown provider: {name!r}. Available: {available}")
     return cls
+
+
+def is_api_provider(name: str) -> bool:
+    """Return True if the provider is an API provider (requires --model)."""
+    return name.lower() in API_DEFAULT_MODELS
 
 
 def list_providers() -> list[str]:
@@ -124,6 +119,7 @@ def _run_cli(
 
 
 # ── CLI Providers ──
+# model=None means "let the CLI pick its own default"
 
 
 class ClaudeCliProvider:
@@ -131,8 +127,8 @@ class ClaudeCliProvider:
 
     name = "claude"
 
-    def __init__(self, model: str = "opus", binary: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, binary: str | None = None, **_kw):
+        self.model = model  # None = CLI picks default
         self.binary = binary or _find_binary("claude", [
             "~/.claude/local/claude",
             "~/.local/bin/claude",
@@ -147,7 +143,6 @@ class ClaudeCliProvider:
     ) -> ProviderResult:
         cmd = [
             self.binary, "-p",
-            "--model", self.model,
             "--output-format", "text",
             "--system-prompt", system_prompt,
             "--no-session-persistence",
@@ -156,6 +151,8 @@ class ClaudeCliProvider:
             "Agent", "Skill", "WebFetch", "WebSearch",
             "NotebookEdit", "LSP",
         ]
+        if self.model:
+            cmd.extend(["--model", self.model])
         if max_budget_usd is not None:
             cmd.extend(["--max-budget-usd", str(max_budget_usd)])
 
@@ -163,7 +160,10 @@ class ClaudeCliProvider:
         if result.returncode != 0:
             raise RuntimeError(f"claude exited {result.returncode}: {result.stderr.strip()}")
 
-        return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
+        return ProviderResult(
+            text=result.stdout.strip(),
+            metadata={"model": self.model or "(cli default)"},
+        )
 
 
 class CodexCliProvider:
@@ -171,7 +171,7 @@ class CodexCliProvider:
 
     name = "codex"
 
-    def __init__(self, model: str = "o4-mini", binary: str | None = None):
+    def __init__(self, model: str | None = None, binary: str | None = None, **_kw):
         self.model = model
         self.binary = binary or _find_binary("codex")
 
@@ -182,34 +182,35 @@ class CodexCliProvider:
         timeout: int = 600,
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
-        # Write system+user prompt to a temp file — CLI args have size limits
         combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
         prompt_path = _write_temp(combined, suffix=".md")
         try:
             cmd = [
                 self.binary, "exec",
-                "-m", self.model,
                 "--full-auto",
                 "--ephemeral",
                 "-q",
                 f"Follow the instructions in {prompt_path} exactly. Output ONLY the ROW lines.",
             ]
+            if self.model:
+                cmd.extend(["-m", self.model])
 
             result = _run_cli(cmd, "", timeout)
         finally:
             os.unlink(prompt_path)
 
         if result.returncode != 0:
-            # Truncate error to avoid dumping the entire prompt
             stderr = result.stderr.strip()
-            # Find the actual error line
             for line in stderr.split("\n"):
                 if "ERROR" in line or "error" in line.lower():
                     stderr = line
                     break
             raise RuntimeError(f"codex exited {result.returncode}: {stderr}")
 
-        return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
+        return ProviderResult(
+            text=result.stdout.strip(),
+            metadata={"model": self.model or "(cli default)"},
+        )
 
 
 class GeminiCliProvider:
@@ -217,7 +218,7 @@ class GeminiCliProvider:
 
     name = "gemini"
 
-    def __init__(self, model: str = "gemini-2.5-pro", binary: str | None = None):
+    def __init__(self, model: str | None = None, binary: str | None = None, **_kw):
         self.model = model
         self.binary = binary or _find_binary("gemini")
 
@@ -228,12 +229,9 @@ class GeminiCliProvider:
         timeout: int = 600,
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
-        # Write system prompt as a policy file and user prompt to a temp file
-        # (prompts with corpus examples can be huge — avoid CLI arg limits)
         policy_path = _write_temp(system_prompt, suffix=".md")
         prompt_path = _write_temp(user_prompt, suffix=".md")
         try:
-            # Read prompt from file for -p flag
             cmd = [
                 self.binary,
                 "-p", f"Follow the instructions in {prompt_path} exactly. Output ONLY the ROW lines.",
@@ -241,6 +239,8 @@ class GeminiCliProvider:
                 "--sandbox", "false",
                 "--policy", policy_path,
             ]
+            if self.model:
+                cmd.extend(["-m", self.model])
 
             result = _run_cli(cmd, "", timeout)
         finally:
@@ -250,7 +250,10 @@ class GeminiCliProvider:
         if result.returncode != 0:
             raise RuntimeError(f"gemini exited {result.returncode}: {result.stderr.strip()}")
 
-        return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
+        return ProviderResult(
+            text=result.stdout.strip(),
+            metadata={"model": self.model or "(cli default)"},
+        )
 
 
 class OpencodeCliProvider:
@@ -258,7 +261,7 @@ class OpencodeCliProvider:
 
     name = "opencode"
 
-    def __init__(self, model: str = "default", binary: str | None = None):
+    def __init__(self, model: str | None = None, binary: str | None = None, **_kw):
         self.model = model
         self.binary = binary or _find_binary("opencode")
 
@@ -270,13 +273,22 @@ class OpencodeCliProvider:
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
         combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
-        cmd = [self.binary, "-p", combined]
+        prompt_path = _write_temp(combined, suffix=".md")
+        try:
+            cmd = [self.binary, "-p", f"Follow instructions in {prompt_path}. Output ONLY ROW lines."]
+            if self.model:
+                cmd.extend(["-m", self.model])
+            result = _run_cli(cmd, "", timeout)
+        finally:
+            os.unlink(prompt_path)
 
-        result = _run_cli(cmd, "", timeout)
         if result.returncode != 0:
             raise RuntimeError(f"opencode exited {result.returncode}: {result.stderr.strip()}")
 
-        return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
+        return ProviderResult(
+            text=result.stdout.strip(),
+            metadata={"model": self.model or "(cli default)"},
+        )
 
 
 class LlamaCliProvider:
@@ -284,7 +296,7 @@ class LlamaCliProvider:
 
     name = "llama"
 
-    def __init__(self, model: str = "llama3.3", binary: str | None = None):
+    def __init__(self, model: str | None = None, binary: str | None = None, **_kw):
         self.model = model
         self.binary = binary or _find_binary("llama", [
             "~/.local/bin/llama",
@@ -298,16 +310,25 @@ class LlamaCliProvider:
         max_budget_usd: float | None = None,
     ) -> ProviderResult:
         combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
-        cmd = [self.binary, "run", self.model, combined]
+        prompt_path = _write_temp(combined, suffix=".md")
+        try:
+            model = self.model or "llama3.3"
+            cmd = [self.binary, "run", model, f"Follow instructions in {prompt_path}. Output ONLY ROW lines."]
+            result = _run_cli(cmd, "", timeout)
+        finally:
+            os.unlink(prompt_path)
 
-        result = _run_cli(cmd, "", timeout)
         if result.returncode != 0:
             raise RuntimeError(f"llama exited {result.returncode}: {result.stderr.strip()}")
 
-        return ProviderResult(text=result.stdout.strip(), metadata={"model": self.model})
+        return ProviderResult(
+            text=result.stdout.strip(),
+            metadata={"model": model},
+        )
 
 
 # ── API Providers ──
+# These always require a model name (defaults baked in).
 
 
 class AnthropicApiProvider:
@@ -315,8 +336,8 @@ class AnthropicApiProvider:
 
     name = "anthropic"
 
-    def __init__(self, model: str = "claude-opus-4-20250514", api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None, **_kw):
+        self.model = model or API_DEFAULT_MODELS["anthropic"]
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
 
     def run(
@@ -354,8 +375,8 @@ class OpenaiApiProvider:
 
     name = "openai"
 
-    def __init__(self, model: str = "gpt-4o", api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None, **_kw):
+        self.model = model or API_DEFAULT_MODELS["openai"]
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
 
     def run(
@@ -394,8 +415,8 @@ class GoogleApiProvider:
 
     name = "google"
 
-    def __init__(self, model: str = "gemini-2.5-pro", api_key: str | None = None):
-        self.model = model
+    def __init__(self, model: str | None = None, api_key: str | None = None, **_kw):
+        self.model = model or API_DEFAULT_MODELS["google"]
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
 
     def run(

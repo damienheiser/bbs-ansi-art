@@ -153,14 +153,15 @@ class AnsiTextGenerator:
     def __init__(
         self,
         corpus: CorpusIndex | None = None,
-        model: str = "opus",
+        model: str | None = None,
         provider: str = "claude",
         **provider_kwargs,
     ):
         """
         Args:
             corpus: Pre-built corpus index for examples. None = no examples.
-            model: Model alias or full name.
+            model: Model name. None = let the provider pick its default.
+                   CLI providers don't need it. API providers have baked-in defaults.
             provider: Provider name — "claude", "codex", "gemini", "opencode",
                       "llama", "anthropic", "openai", "google".
             **provider_kwargs: Extra kwargs passed to the provider constructor
