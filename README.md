@@ -214,6 +214,22 @@ result.document.save("hello.ans")   # Save as .ans file
 print(f"Cost: ${result.cost_usd:.4f}")
 ```
 
+### Shell Completions
+
+Tab-completion for `--style`, `--model`, and all flags:
+
+```bash
+# Bash — add to ~/.bashrc
+source /path/to/bbs-ansi-art/completions/generate-art.bash
+
+# Zsh — add to ~/.zshrc
+source /path/to/bbs-ansi-art/completions/generate-art.zsh
+
+# Fish — copy to completions dir
+cp /path/to/bbs-ansi-art/completions/generate-art.fish \
+   ~/.config/fish/completions/generate_art.py.fish
+```
+
 ## Architecture
 
 ```
